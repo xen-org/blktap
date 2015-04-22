@@ -60,12 +60,14 @@ make install DESTDIR=%{buildroot}
 %{_sbindir}/td-rated
 %{_sbindir}/part-util
 %{_sbindir}/vhdpartx
+%{_sbindir}/xen-ringwatch
 %{_libexecdir}/tapdisk
 %{_sysconfdir}/udev/rules.d/blktap.rules
 %{_sysconfdir}/rc.d/init.d/tapback
 %{_sysconfdir}/logrotate.d/blktap
 %{_sysconfdir}/xensource/bugtool/tapdisk-logs.xml
 %{_sysconfdir}/xensource/bugtool/tapdisk-logs/description.xml
+%{_sysconfdir}/cron.d/ringwatch
 
 %files devel
 %defattr(-,root,root,-)
