@@ -5,14 +5,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  *  1. Redistributions of source code must retain the above copyright
  *     notice, this list of conditions and the following disclaimer.
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- *  3. Neither the name of the copyright holder nor the names of its 
- *     contributors may be used to endorse or promote products derived from 
+ *  3. Neither the name of the copyright holder nor the names of its
+ *     contributors may be used to endorse or promote products derived from
  *     this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
@@ -129,13 +129,16 @@ complete_tiocb(struct tqueue *queue, struct tiocb *tiocb, unsigned long res)
 	int err;
 	struct iocb *iocb = &tiocb->iocb;
 
-	if (res == iocb->u.c.nbytes)
-		err = 0;
-	else if ((int)res < 0)
-		err = (int)res;
-	else
-		err = -EIO;
-
+	if (tiocb->op == TIO_CMD_DISCARD) {
+		err = res;
+	} else {
+		if (res == iocb->u.c.nbytes)
+			err = 0;
+		else if ((int)res < 0)
+			err = (int)res;
+		else
+			err = -EIO;
+	}
 	tiocb->cb(tiocb->arg, tiocb, err);
 }
 
@@ -148,11 +151,11 @@ cancel_tiocbs(struct tqueue *queue, int err)
 	if (!queue->queued)
 		return 0;
 
-	/* 
+	/*
 	 * td_complete may queue more tiocbs, which
 	 * will overwrite the contents of queue->iocbs.
 	 * use a private linked list to keep track
-	 * of the tiocbs we're cancelling. 
+	 * of the tiocbs we're cancelling.
 	 */
 	tiocb  = queue->iocbs[0]->data;
 	queued = queue->queued;
@@ -170,7 +173,7 @@ fail_tiocbs(struct tqueue *queue, int succeeded, int total, int err)
 	ERR(err, "io_submit error: %d of %d failed",
 	    total - succeeded, total);
 
-	/* take any non-submitted, merged iocbs 
+	/* take any non-submitted, merged iocbs
 	 * off of the queue, split them, and fail them */
 	queue->queued = io_expand_iocbs(&queue->opioctx,
 					queue->iocbs, succeeded, total);
@@ -216,7 +219,7 @@ tapdisk_rwio_rw(const struct iocb *iocb)
 	char *buf     = iocb->u.c.buf;
 	long long off = iocb->u.c.offset;
 	size_t size   = iocb->u.c.nbytes;
-	ssize_t (*func)(int, void *, size_t) = 
+	ssize_t (*func)(int, void *, size_t) =
 		(iocb->aio_lio_opcode == IO_CMD_PWRITE ? vwrite : read);
 
 	if (lseek64(fd, off, SEEK_SET) == (off64_t)-1)
@@ -226,6 +229,19 @@ tapdisk_rwio_rw(const struct iocb *iocb)
 		return -errno;
 
 	return size;
+}
+
+static inline ssize_t
+tapdisk_rwio_discard(const struct iocb *iocb)
+{
+	int fd        = iocb->aio_fildes;
+	int mode      = FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE;
+	long long off = iocb->u.c.offset;
+	size_t size   = iocb->u.c.nbytes;
+
+    if (fallocate(fd, mode, off, size))
+		return -errno;
+    return 0;
 }
 
 static int
@@ -248,8 +264,12 @@ tapdisk_rwio_submit(struct tqueue *queue)
 	for (i = 0; i < merged; i++) {
 		ep      = rwio->aio_events + i;
 		iocb    = queue->iocbs[i];
+		tiocb   = iocb->data;
 		ep->obj = iocb;
-		ep->res = tapdisk_rwio_rw(iocb);
+		if (tiocb->op == TIO_CMD_DISCARD)
+			ep->res = tapdisk_rwio_discard(iocb);
+		else
+			ep->res = tapdisk_rwio_rw(iocb);
 	}
 
 	split = io_split(&queue->opioctx, rwio->aio_events, merged);
@@ -539,7 +559,7 @@ tapdisk_lio_submit(struct tqueue *queue)
 	queue->queued          = 0;
 
 	if (err)
-		queue->tiocbs_pending -= 
+		queue->tiocbs_pending -=
 			fail_tiocbs(queue, submitted, merged, err);
 
 	return submitted;
@@ -656,7 +676,7 @@ tapdisk_free_queue(struct tqueue *queue)
 	opio_free(&queue->opioctx);
 }
 
-void 
+void
 tapdisk_debug_queue(struct tqueue *queue)
 {
 	struct tiocb *tiocb = queue->deferred.head;

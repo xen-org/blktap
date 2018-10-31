@@ -5,14 +5,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  *  1. Redistributions of source code must retain the above copyright
  *     notice, this list of conditions and the following disclaimer.
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- *  3. Neither the name of the copyright holder nor the names of its 
- *     contributors may be used to endorse or promote products derived from 
+ *  3. Neither the name of the copyright holder nor the names of its
+ *     contributors may be used to endorse or promote products derived from
  *     this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
@@ -147,7 +147,7 @@ xenio_pending_blkif(struct td_xenio_ctx * const ctx)
  */
 static inline void
 xenio_blkif_get_request(struct td_xenblkif * const blkif,
-        blkif_request_t *const dst, const RING_IDX idx)
+						void *dst, const RING_IDX idx)
 {
     blkif_back_rings_t * rings;
 
@@ -167,17 +167,23 @@ xenio_blkif_get_request(struct td_xenblkif * const blkif,
 
         case BLKIF_PROTOCOL_X86_32:
             {
-                blkif_x86_32_request_t *src;
+                void *src;
                 src = RING_GET_REQUEST(&rings->x86_32, idx);
-                blkif_get_req(dst, src);
+				if (((blkif_request_t *)(src))->operation == BLKIF_OP_DISCARD)
+					blkif_get_x86_32_req_discard(dst, src);
+				else
+					blkif_get_x86_32_req(dst, src);
                 break;
             }
 
         case BLKIF_PROTOCOL_X86_64:
             {
-                blkif_x86_64_request_t *src;
+                void *src;
                 src = RING_GET_REQUEST(&rings->x86_64, idx);
-                blkif_get_req(dst, src);
+				if (((blkif_request_t *)(src))->operation == BLKIF_OP_DISCARD)
+					blkif_get_x86_64_req_discard(dst, src);
+				else
+					blkif_get_x86_64_req(dst, src);
                 break;
             }
 
@@ -225,11 +231,12 @@ __xenio_blkif_get_requests(struct td_xenblkif * const blkif,
 			rc != rp && n < count && !barrier;
 			rc++, n++) {
 
-        blkif_request_t *dst = reqs[n];
+        void *dst = reqs[n];
 
         xenio_blkif_get_request(blkif, dst, rc);
 
-		if (unlikely(dst->operation == BLKIF_OP_WRITE_BARRIER))
+		if (unlikely(((blkif_request_t *)(dst))->operation == BLKIF_OP_WRITE_BARRIER))
+
 			barrier = true;
     }
 

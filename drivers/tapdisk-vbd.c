@@ -5,14 +5,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  *  1. Redistributions of source code must retain the above copyright
  *     notice, this list of conditions and the following disclaimer.
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- *  3. Neither the name of the copyright holder nor the names of its 
- *     contributors may be used to endorse or promote products derived from 
+ *  3. Neither the name of the copyright holder nor the names of its
+ *     contributors may be used to endorse or promote products derived from
  *     this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
@@ -427,7 +427,7 @@ tapdisk_vbd_add_secondary(td_vbd_t *vbd)
 
 		vbd->secondary=NULL;
 		vbd->secondary_mode=TD_VBD_SECONDARY_DISABLED;
-		
+
 		goto fail;
 	}
 
@@ -447,7 +447,7 @@ tapdisk_vbd_add_secondary(td_vbd_t *vbd)
 		DPRINTF("In mirror mode\n");
 		vbd->secondary_mode = TD_VBD_SECONDARY_MIRROR;
 		/*
-		 * we actually need this image to also be part of the chain, 
+		 * we actually need this image to also be part of the chain,
 		 * since it may already contain data
 		 */
 		list_add(&second->next, &leaf->next);
@@ -751,7 +751,7 @@ tapdisk_vbd_shutdown(td_vbd_t *vbd)
 	tapdisk_vbd_queue_count(vbd, &new, &pending, &failed, &completed);
 
 	DPRINTF("%s: state: 0x%08x, new: 0x%02x, pending: 0x%02x, "
-		"failed: 0x%02x, completed: 0x%02x\n", 
+		"failed: 0x%02x, completed: 0x%02x\n",
 		vbd->name, vbd->state, new, pending, failed, completed);
 	DPRINTF("last activity: %010ld.%06ld, errors: 0x%04"PRIx64", "
 		"retries: 0x%04"PRIx64", received: 0x%08"PRIx64", "
@@ -778,7 +778,7 @@ tapdisk_vbd_close(td_vbd_t *vbd)
 	if (!list_empty(&vbd->pending_requests))
 		goto fail;
 
-	/* 
+	/*
 	 * if the queue is still active and we have more
 	 * requests, try to complete them before closing.
 	 */
@@ -1145,7 +1145,7 @@ tapdisk_vbd_check_progress(td_vbd_t *vbd)
 }
 
 /*
- * request submission 
+ * request submission
  */
 
 static int
@@ -1247,7 +1247,7 @@ __tapdisk_vbd_complete_td_request(td_vbd_t *vbd, td_vbd_request_t *vreq,
             vbd->vdi_stats.stats->read_reqs_completed++;
             vbd->vdi_stats.stats->read_sectors += treq.secs;
             vbd->vdi_stats.stats->read_total_ticks += interval;
-        }else{
+        }else if (treq.op == TD_OP_WRITE){
             vbd->vdi_stats.stats->write_reqs_completed++;
             vbd->vdi_stats.stats->write_sectors += treq.secs;
             vbd->vdi_stats.stats->write_total_ticks += interval;
@@ -1372,8 +1372,8 @@ tapdisk_vbd_complete_td_request(td_request_t treq, int res)
 		}
 	}
 
-	if (res != 0 && image->type == DISK_TYPE_NBD && 
-			((image == vbd->secondary) || 
+	if (res != 0 && image->type == DISK_TYPE_NBD &&
+			((image == vbd->secondary) ||
 			 (image == vbd->retired))) {
 		ERROR("Got non-zero res for NBD secondary - disabling "
 				"mirroring: %s",vreq->name);
@@ -1460,12 +1460,12 @@ tapdisk_vbd_issue_request(td_vbd_t *vbd, td_vbd_request_t *vreq)
 			treq.op = TD_OP_WRITE;
                         vbd->vdi_stats.stats->write_reqs_submitted++;
 			/*
-			 * it's important to queue the mirror request before 
-			 * queuing the main one. If the main image runs into 
-			 * ENOSPC, the mirroring could be disabled before 
-			 * td_queue_write returns, so if the mirror request was 
-			 * queued after (which would then not happen), we'd 
-			 * lose that write and cause the process to hang with 
+			 * it's important to queue the mirror request before
+			 * queuing the main one. If the main image runs into
+			 * ENOSPC, the mirroring could be disabled before
+			 * td_queue_write returns, so if the mirror request was
+			 * queued after (which would then not happen), we'd
+			 * lose that write and cause the process to hang with
 			 * unacknowledged writes
 			 */
 			if (vbd->secondary_mode == TD_VBD_SECONDARY_MIRROR)
@@ -1500,6 +1500,56 @@ out:
 fail:
 	vreq->error = err;
 	goto out;
+}
+
+static int
+tapdisk_vbd_issue_request_discard(td_vbd_t *vbd, td_vbd_request_t *vreq)
+{
+	td_image_t *image;
+	td_request_t treq;
+	td_sector_t sec;
+	int err;
+
+	sec    = vreq->sec;
+	image  = tapdisk_vbd_first_image(vbd);
+
+	vreq->submitting = 1;
+
+	tapdisk_vbd_mark_progress(vbd);
+	vreq->last_try = vbd->ts;
+
+	tapdisk_vbd_move_request(vreq, &vbd->pending_requests);
+
+	err = tapdisk_vbd_check_queue(vbd);
+	if (err) {
+		vreq->error = err;
+		goto out;
+	}
+
+	err = tapdisk_image_check_request(image, vreq);
+	if (err) {
+		vreq->error = err;
+		goto out;
+	}
+
+	treq.sidx = 0;
+	treq.sec = sec;
+	treq.secs = vreq->nr_sectors;
+	treq.image = image;
+	treq.cb = tapdisk_vbd_complete_td_request;
+	treq.cb_data = NULL;
+	treq.vreq = vreq;
+	treq.op = TD_OP_DISCARD;
+	td_queue_discard(treq.image, treq);
+
+ out:
+	vreq->submitting--;
+	if (!vreq->secs_pending) {
+		err = (err ? : vreq->error);
+		tapdisk_vbd_complete_vbd_request(vbd, vreq);
+	}
+
+	return err;
 }
 
 static int
@@ -1541,7 +1591,10 @@ tapdisk_vbd_reissue_failed_requests(td_vbd_t *vbd)
 		    "sec 0x%08"PRIx64", iovcnt: %d\n", vreq->num_retries,
 		    vreq->name, vreq->sec, vreq->iovcnt);
 
-		err = tapdisk_vbd_issue_request(vbd, vreq);
+		if (vreq->op == TD_OP_DISCARD)
+			err = tapdisk_vbd_issue_request_discard(vbd, vreq);
+		else
+			err = tapdisk_vbd_issue_request(vbd, vreq);
 		/*
 		 * if this request failed, but was not completed,
 		 * we'll back off for a while.
@@ -1572,7 +1625,10 @@ tapdisk_vbd_issue_new_requests(td_vbd_t *vbd)
 	td_vbd_request_t *vreq, *tmp;
 
 	tapdisk_vbd_for_each_request(vreq, tmp, &vbd->new_requests) {
-		err = tapdisk_vbd_issue_request(vbd, vreq);
+		if (vreq->op == TD_OP_DISCARD)
+			err = tapdisk_vbd_issue_request_discard(vbd, vreq);
+		else
+			err = tapdisk_vbd_issue_request(vbd, vreq);
 		/*
 		 * if this request failed, but was not completed,
 		 * we'll back off for a while.

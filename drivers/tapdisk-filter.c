@@ -5,14 +5,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  *  1. Redistributions of source code must retain the above copyright
  *     notice, this list of conditions and the following disclaimer.
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- *  3. Neither the name of the copyright holder nor the names of its 
- *     contributors may be used to endorse or promote products derived from 
+ *  3. Neither the name of the copyright holder nor the names of its
+ *     contributors may be used to endorse or promote products derived from
  *     this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
@@ -237,6 +237,9 @@ tapdisk_filter_iocbs(struct tfilter *filter, struct iocb **iocbs, int num)
 	for (i = 0; i < num; i++) {
 		struct iocb *io = iocbs[i];
 
+		if (io->aio_lio_opcode == IO_CMD_NOOP)
+			continue;
+
 		if (filter->mode & TD_INJECT_FAULTS) {
 			if ((random() % 100) <= TD_FAULT_RATE) {
 				inject_fault(filter, io);
@@ -259,6 +262,9 @@ tapdisk_filter_events(struct tfilter *filter, struct io_event *events, int num)
 
 	for (i = 0; i < num; i++) {
 		struct iocb *io = events[i].obj;
+
+		if (io->aio_lio_opcode == IO_CMD_NOOP)
+			continue;
 
 		if (filter->mode & TD_INJECT_FAULTS) {
 			if (fault_injected(filter, io)) {

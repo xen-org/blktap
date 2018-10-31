@@ -5,14 +5,14 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  *  1. Redistributions of source code must retain the above copyright
  *     notice, this list of conditions and the following disclaimer.
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- *  3. Neither the name of the copyright holder nor the names of its 
- *     contributors may be used to endorse or promote products derived from 
+ *  3. Neither the name of the copyright holder nor the names of its
+ *     contributors may be used to endorse or promote products derived from
  *     this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
@@ -107,7 +107,8 @@ tapdisk_image_check_td_request(td_image_t *image, td_request_t treq)
 	info   = &image->info;
 	rdonly = td_flag_test(image->flags, TD_OPEN_RDONLY);
 
-	if (treq.op != TD_OP_READ && treq.op != TD_OP_WRITE)
+	if (treq.op != TD_OP_READ && treq.op != TD_OP_WRITE &&
+		treq.op != TD_OP_DISCARD)
 		goto fail;
 
 	if (treq.op == TD_OP_WRITE && rdonly) {
@@ -115,7 +116,8 @@ tapdisk_image_check_td_request(td_image_t *image, td_request_t treq)
 		goto fail;
 	}
 
-	if (treq.secs <= 0 || treq.sec + treq.secs > info->size)
+	if ((treq.secs <= 0 || treq.sec + treq.secs > info->size) &&
+		treq.op != TD_OP_DISCARD)
 		goto fail;
 
 	return 0;
@@ -153,6 +155,8 @@ tapdisk_image_check_request(td_image_t *image, td_vbd_request_t *vreq)
 		secs += vreq->iov[i].secs;
 
 	switch (vreq->op) {
+	case TD_OP_DISCARD:
+		/* falls through */
 	case TD_OP_WRITE:
 		if (rdonly) {
 			err = -EPERM;
